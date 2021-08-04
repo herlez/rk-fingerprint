@@ -8,21 +8,21 @@
 namespace herlez::rolling_hash {
 __extension__ typedef unsigned __int128 uint128_t;
 
-template <typename t_it, size_t t_tau = 1024, size_t t_prime_exp = 107>
+template <typename t_it, size_t t_prime_exp = 107>
 class rk_prime {
  public:
-  rk_prime(t_it fp_begin, t_it text_end, uint128_t base)
-      : m_fp_begin(fp_begin),
-        m_fp_end(fp_begin + t_tau),
-        m_text_end(text_end),
+  rk_prime(t_it fp_begin, uint128_t tau, uint128_t base)
+      : m_tau(tau),
+        m_fp_begin(fp_begin),
+        m_fp_end(fp_begin + m_tau),
         m_cur_fp(0),
         m_base(base) {
     //prime should be mersenne and (prime*base + prime) should not overflow
-    static_assert(t_prime_exp == 107 || t_prime_exp == 61 || t_prime_exp == 89);
+    //static_assert(t_prime_exp == 107 || t_prime_exp == 61 || t_prime_exp == 89);
     assert(t_prime_exp + std::log2(m_base) < 126);
     fillPowerTable();
     //Calculate first window
-    for (size_t i = 0; i < t_tau; ++i) {
+    for (size_t i = 0; i < m_tau; ++i) {
       m_cur_fp *= m_base;
       m_cur_fp += (unsigned char)m_fp_begin[i];
       m_cur_fp = mod_m_prime(m_cur_fp);
@@ -46,9 +46,9 @@ class rk_prime {
 
  private:
   static constexpr uint128_t m_prime = (uint128_t{1} << t_prime_exp) - 1;
+  uint128_t m_tau;
   t_it m_fp_begin;
   t_it m_fp_end;
-  t_it m_text_end;
   uint128_t m_cur_fp;
 
   uint128_t m_base;
@@ -88,9 +88,9 @@ class rk_prime {
   }
 
   inline uint128_t calculatePowerModulo() const {
-    assert(__builtin_popcount(t_tau) == 1);
+    assert(__builtin_popcount(m_tau) == 1);
     uint128_t x = m_base;
-    for (unsigned int i = 0; i < std::log2(t_tau); i++) {
+    for (unsigned int i = 0; i < std::log2(m_tau); i++) {
       x = mulmod(x, x);
       //x = mod_m_prime(x*x); //overflows
     }

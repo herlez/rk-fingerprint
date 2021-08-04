@@ -5,13 +5,13 @@
 #include <string>
 #include <vector>
 
-#include "rolling_hash/rk_prime.hpp"
 #include "rolling_hash/fingerprinting.hpp"
+#include "rolling_hash/rk_prime.hpp"
 #include "timer.hpp"
 
 __extension__ typedef unsigned __int128 uint128_t;
 
-std::string file_to_string(std::string path) {
+inline std::string file_to_string(std::string path) {
   std::ifstream stream(path);
   std::string text((std::istreambuf_iterator<char>(stream)),
                    std::istreambuf_iterator<char>());
@@ -36,17 +36,80 @@ inline std::ostream &operator<<(std::ostream &out,
   return out;
 }
 
+template <uint128_t prime_exp>
+inline void benchmark_a(std::string &text, std::string &path, uint128_t tau, uint128_t base) {
+  timer tmr{};
+  auto rk = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), prime_exp>(text.cbegin(), tau, base);
+  auto fp = rk.get_currect_fp();
+  for (size_t i = 0; i < text.size() - tau; ++i) {
+    fp = rk.roll();
+  }
+  size_t time = tmr.get();
 
-int main(int argc, char** argv) {
+  //Correctness test
+  size_t last_window_index = text.size() - tau;
+  auto rk_test = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), prime_exp>(text.cbegin() + last_window_index, tau, base);
+  auto fp_test = rk_test.get_currect_fp();
+  if (fp != fp_test) {
+    std::cout << "Fingerprints were not calculated correctly.\n"
+              << "Current: " << fp << " Correct: " << fp_test << "\n";
+  }
+
+  std::cout << "RESULT"
+            << " algo=alex" << prime_exp
+            << " text=" << path
+            << " size=" << text.size()
+            << " time=" << time
+            << " hash=" << fp
+            << " correct=" << std::boolalpha << (fp == fp_test)
+            << '\n';
+}
+
+template <kr_fingerprinting::MersennePrime p>
+inline void benchmark_j(std::string &text, std::string &path, uint128_t tau, uint128_t base) {
+  timer tmr{};
+  typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true> rk = typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true>(tau, base);
+  typename kr_fingerprinting::kr_fingerprinter<p>::uintX_t fp = 0;
+  for (size_t i = 0; i < tau; ++i) {
+    fp = rk.roll_right(fp, (u_char)0, (u_char)text[i]);
+  }
+  for (size_t i = 0; i < text.size() - tau; ++i) {
+    fp = rk.roll_right(fp, (u_char)text[i], (u_char)text[i + tau]);
+  }
+  size_t time = tmr.get();
+
+  //Correctness test
+  size_t last_window_index = text.size() - tau;
+  typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true> rk_test = typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true>(tau, base);
+  typename kr_fingerprinting::kr_fingerprinter<p>::uintX_t fp_test = 0;
+  for (size_t i = last_window_index; i < text.size(); ++i) {
+    fp_test = rk_test.roll_right(fp_test, (u_char)0, (u_char)text[i]);
+  }
+  if (fp != fp_test) {
+    std::cout << "Fingerprints were not calculated correctly.\n"
+              << "Current: " << fp << " Correct: " << fp_test << "\n";
+  }
+
+  std::cout << "RESULT"
+            << " algo=jonas" << p::shift
+            << " text=" << path
+            << " size=" << text.size()
+            << " time=" << time
+            << " hash=" << fp
+            << " correct=" << std::boolalpha << (fp == fp_test)
+            << '\n';
+}
+
+int main(int argc, char **argv) {
   //Window length
-  static constexpr size_t tau = 256;
-  volatile uint128_t base;
+  size_t tau;
   std::string text;
   std::string path;
+  size_t base;
   //Read File
   {
     if (argc != 4) {
-      std::cerr << "Format: bench FILEPATH BASE\n";
+      std::cerr << "Format: bench FILEPATH TAU BASE\n";
       return -1;
     }
     path = argv[1];
@@ -55,14 +118,25 @@ int main(int argc, char** argv) {
       std::cerr << "File " << path << " could not be read\n";
       return -1;
     }
-    base = (static_cast<uint128_t>(std::atol(argv[2])) << 64) + std::atol(argv[3]);
+    tau = std::atoi(argv[2]);
+    base = std::atoi(argv[3]);
   }
 
-  //Benchmark Alex61
+  benchmark_a<61>(text, path, tau, base);
+  benchmark_a<89>(text, path, tau, base);
+  benchmark_a<107>(text, path, tau, base);
+
+  benchmark_j<kr_fingerprinting::MERSENNE61>(text, path, tau, base);
+  benchmark_j<kr_fingerprinting::MERSENNE89>(text, path, tau, base);
+  benchmark_j<kr_fingerprinting::MERSENNE107>(text, path, tau, base);
+  benchmark_j<kr_fingerprinting::MERSENNE127>(text, path, tau, base);
+
+  //WHY IS THIS SO FAST?
+  constexpr uint128_t tau1 = 107;
   {
     timer tmr{};
-    auto rk = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau, 61>(text.cbegin(), text.cend(), base);
-    uint128_t fp = rk.get_currect_fp();
+    auto rk = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau1>(text.cbegin(), tau, base);
+    auto fp = rk.get_currect_fp();
     for (size_t i = 0; i < text.size() - tau; ++i) {
       fp = rk.roll();
     }
@@ -70,15 +144,15 @@ int main(int argc, char** argv) {
 
     //Correctness test
     size_t last_window_index = text.size() - tau;
-    auto rk_test = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau, 61>(text.cbegin() + last_window_index, text.cend(), base);
-    uint128_t fp_test = rk_test.get_currect_fp();
+    auto rk_test = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau1>(text.cbegin() + last_window_index, tau, base);
+    auto fp_test = rk_test.get_currect_fp();
     if (fp != fp_test) {
       std::cout << "Fingerprints were not calculated correctly.\n"
                 << "Current: " << fp << " Correct: " << fp_test << "\n";
     }
 
     std::cout << "RESULT"
-              << " algo=alex61"
+              << " algo=alex" << tau1
               << " text=" << path
               << " size=" << text.size()
               << " time=" << time
@@ -86,140 +160,5 @@ int main(int argc, char** argv) {
               << " correct=" << std::boolalpha << (fp == fp_test)
               << '\n';
   }
-
-   //Benchmark Alex107
-  {
-    timer tmr{};
-    auto rk = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau, 107>(text.cbegin(), text.cend(), base);
-    uint128_t fp = rk.get_currect_fp();
-    for (size_t i = 0; i < text.size() - tau; ++i) {
-      fp = rk.roll();
-    }
-    size_t time = tmr.get();
-
-    //Correctness test
-    size_t last_window_index = text.size() - tau;
-    auto rk_test = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau, 107>(text.cbegin() + last_window_index, text.cend(), base);
-    uint128_t fp_test = rk_test.get_currect_fp();
-    if (fp != fp_test) {
-      std::cout << "Fingerprints were not calculated correctly.\n"
-                << "Current: " << fp << " Correct: " << fp_test << "\n";
-    }
-
-    std::cout << "RESULT"
-              << " algo=alex107"
-              << " text=" << path
-              << " size=" << text.size()
-              << " time=" << time
-              << " hash=" << fp
-              << " correct=" << std::boolalpha << (fp == fp_test)
-              << '\n';
-  }
-
-  //Benchmark Jonas61
-  {
-    timer tmr{};
-    auto rk = kr_fingerprinting::kr_fingerprinter<kr_fingerprinting::MERSENNE61>::sliding_window_precompute<true>(tau, base);
-    uint64_t fp = 0;
-    for(size_t i = 0; i < tau; ++i) {
-      fp = rk.roll_right(fp, 0, text[i]);
-    }
-    for (size_t i = 0; i < text.size() - tau; ++i) {
-      fp = rk.roll_right(fp, text[i], text[i+tau]);
-    }
-    size_t time = tmr.get();
-
-    //Correctness test
-    size_t last_window_index = text.size() - tau;
-    auto rk_test = kr_fingerprinting::kr_fingerprinter<kr_fingerprinting::MERSENNE61>::sliding_window_precompute<true>(tau, base);
-    uint64_t fp_test = 0;
-    for(size_t i = last_window_index; i < text.size(); ++i) {
-      fp_test = rk_test.roll_right(fp_test, 0, text[i]);
-    }
-    if (fp != fp_test) {
-      std::cout << "Fingerprints were not calculated correctly.\n"
-                << "Current: " << fp << " Correct: " << fp_test << "\n";
-    }
-
-    std::cout << "RESULT"
-              << " algo=jonas61"
-              << " text=" << path
-              << " size=" << text.size()
-              << " time=" << time
-              << " hash=" << fp
-              << " correct=" << std::boolalpha << (fp == fp_test)
-              << '\n';
-  }
-
-  //Benchmark Jonas107
-  {
-    timer tmr{};
-    auto rk = kr_fingerprinting::kr_fingerprinter<kr_fingerprinting::MERSENNE107>::sliding_window(tau, base);
-    uint128_t fp = 0;
-    for(size_t i = 0; i < tau; ++i) {
-      fp = rk.roll_right(fp, 0, text[i]);
-    }
-    for (size_t i = 0; i < text.size() - tau; ++i) {
-      fp = rk.roll_right(fp, text[i], text[i+tau]);
-    }
-    size_t time = tmr.get();
-
-    //Correctness test
-    size_t last_window_index = text.size() - tau;
-    auto rk_test = kr_fingerprinting::kr_fingerprinter<kr_fingerprinting::MERSENNE107>::sliding_window(tau, base);
-    uint128_t fp_test = 0;
-    for(size_t i = last_window_index; i < text.size(); ++i) {
-      fp_test = rk_test.roll_right(fp_test, 0, text[i]);
-    }
-    if (fp != fp_test) {
-      std::cout << "Fingerprints were not calculated correctly.\n"
-                << "Current: " << fp << " Correct: " << fp_test << "\n";
-    }
-
-    std::cout << "RESULT"
-              << " algo=jonas107"
-              << " text=" << path
-              << " size=" << text.size()
-              << " time=" << time
-              << " hash=" << fp
-              << " correct=" << std::boolalpha << (fp == fp_test)
-              << '\n';
-  }
-
-  //Benchmark Jonas127
-  // {
-
-  //   timer tmr{};
-  //   auto rk = kr_fingerprinting::kr_fingerprinter<kr_fingerprinting::MERSENNE107>::sliding_window(tau, base);
-  //   uint128_t fp = 0;
-  //   for(size_t i = 0; i < tau; ++i) {
-  //     fp = rk.roll_right(fp, 0, text[i]);
-  //   }
-  //   for (size_t i = 0; i < text.size() - tau; ++i) {
-  //     fp = rk.roll_right(fp, text[i], text[i+tau]);
-  //   }
-  //   size_t time = tmr.get();
-
-  //   //Correctness test
-  //   size_t last_window_index = text.size() - tau;
-  //   auto rk_test = kr_fingerprinting::kr_fingerprinter<kr_fingerprinting::MERSENNE107>::sliding_window(tau, base);
-  //   uint128_t fp_test = 0;
-  //   for(size_t i = last_window_index; i < text.size(); ++i) {
-  //     fp_test = rk_test.roll_right(fp_test, 0, text[i]);
-  //   }
-  //   if (fp != fp_test) {
-  //     std::cout << "Fingerprints were not calculated correctly.\n"
-  //               << "Current: " << fp << " Correct: " << fp_test << "\n";
-  //   }
-
-  //   std::cout << "RESULT"
-  //             << " algo=jonas107"
-  //             << " text=" << path
-  //             << " size=" << text.size()
-  //             << " time=" << time
-  //             << " hash=" << fp
-  //             << " correct=" << std::boolalpha << (fp == fp_test)
-  //             << '\n';
-  // }
   return 0;
 }

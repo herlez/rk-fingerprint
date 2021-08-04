@@ -19,9 +19,21 @@ constexpr uint64_t countr_zero(uint128_t v) {
                    : (std::countr_zero((uint64_t)(v >> 64)) + 64);
 }
 
+template <uint64_t s>
+struct MERSENNE {
+  using uintX_t = uint128_t;
+  constexpr static uintX_t value = (((uintX_t)1ULL) << s) - 1;
+  constexpr static uintX_t shift = s;
+};
+
 struct MERSENNE61 {
   using uintX_t = uint64_t;
   constexpr static uintX_t value = (((uintX_t)1ULL) << 61) - 1;
+  constexpr static uintX_t shift = countr_zero(value + 1);
+};
+struct MERSENNE89 {
+  using uintX_t = uint128_t;
+  constexpr static uintX_t value = (((uintX_t)1ULL) << 89) - 1;
   constexpr static uintX_t shift = countr_zero(value + 1);
 };
 struct MERSENNE107 {
@@ -37,8 +49,8 @@ struct MERSENNE127 {
 
 template <typename p>
 concept MersennePrime =
-    std::is_same_v<p, MERSENNE61> || std::is_same_v<p, MERSENNE107> ||
-    std::is_same_v<p, MERSENNE127>;
+    true || std::is_same_v<p, MERSENNE61> || std::is_same_v<p, MERSENNE89> ||
+    std::is_same_v<p, MERSENNE107> || std::is_same_v<p, MERSENNE127>;
 
 template <MersennePrime p>
 struct kr_fingerprinter {
@@ -268,35 +280,6 @@ struct kr_fingerprinter {
         return modulo(mult_add(base_, fp, table_(pop_left)) + push_right);
       }
     }
-
-    inline uintX_t roll_right(uintX_t const fp, uintX_t const pop_left,
-                              uintX_t const push_right) {
-      constexpr static uint128_t maxproduct =
-          (is_64_bit) ? (((uint128_t)prime) * prime) : ((uint128_t)prime);
-
-      uint128_t const shifted_fingerprint = mult(base_, fp);
-      uint128_t const pop = maxproduct - mult(max_exponent_, pop_left);
-
-      if constexpr (is_64_bit) {
-        return modulo(shifted_fingerprint + pop + push_right);
-      } else {
-        return modulo(modulo(shifted_fingerprint + pop) + push_right);
-      }
-    }
-
-    // this could be more efficient!
-    /*inline uintX_t roll_left(uintX_t const fp, uintX_t const push_left,
-                             uintX_t const pop_right) {
-      uintX_t const popped_fingerprint = prime + fp - pop_right;
-      uint128_t const push = mult(max_exponent_, push_left);
-      if constexpr (is_64_bit) {
-        return mult_modulo(modulo(push + popped_fingerprint), inverse_base_);
-      } else {
-        return mult_modulo(modulo(push + modulo(popped_fingerprint)),
-                           inverse_base_);
-      }
-    }*/
-
     inline uintX_t base() const { return base_; }
   };
 
@@ -304,3 +287,15 @@ struct kr_fingerprinter {
 };
 
 }  // namespace kr_fingerprinting
+
+namespace std {
+std::string to_string(kr_fingerprinting::uint128_t value) {
+  char buffer[64];  // 39 should be enough
+  char *digit = &(buffer[64]);
+  do {
+    *(--digit) = "0123456789"[value % 10];
+    value /= 10;
+  } while (value != 0);
+  return std::string(digit, &buffer[64]);
+}
+}  // namespace std
