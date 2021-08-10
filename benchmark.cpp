@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "rolling_hash/fingerprinting.hpp"
+#include <include/kr-fingerprinting.hpp>
+#include <include/kr-fingerprinting64.hpp>
+#include <include/kr-fingerprinting128.hpp>
 #include "rolling_hash/rk_prime.hpp"
 #include "timer.hpp"
 
@@ -39,6 +41,9 @@ inline std::ostream &operator<<(std::ostream &out,
 template <uint128_t prime_exp>
 inline void benchmark_a(std::string &text, std::string &path, uint128_t tau, uint128_t base) {
   timer tmr{};
+  //if(base > (1<<20)) {
+  //  __builtin_unreachable();
+  //}
   auto rk = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), prime_exp>(text.cbegin(), tau, base);
   auto fp = rk.get_currect_fp();
   for (size_t i = 0; i < text.size() - tau; ++i) {
@@ -65,11 +70,13 @@ inline void benchmark_a(std::string &text, std::string &path, uint128_t tau, uin
             << '\n';
 }
 
-template <kr_fingerprinting::MersennePrime p>
-inline void benchmark_j(std::string &text, std::string &path, uint128_t tau, uint128_t base) {
+template <uint64_t shift>
+inline void benchmark_j(std::string &text, std::string &path, uint128_t tau) {
   timer tmr{};
-  typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true> rk = typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true>(tau, base);
-  typename kr_fingerprinting::kr_fingerprinter<p>::uintX_t fp = 0;
+  using sw = kr_fingerprinting::sliding_window<shift>;
+  using fp_type = typename sw::fingerprint_type;
+  sw rk(tau);
+  fp_type fp = 0;
   for (size_t i = 0; i < tau; ++i) {
     fp = rk.roll_right(fp, (u_char)0, (u_char)text[i]);
   }
@@ -80,8 +87,8 @@ inline void benchmark_j(std::string &text, std::string &path, uint128_t tau, uin
 
   //Correctness test
   size_t last_window_index = text.size() - tau;
-  typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true> rk_test = typename kr_fingerprinting::kr_fingerprinter<p>::sliding_window_precompute<true>(tau, base);
-  typename kr_fingerprinting::kr_fingerprinter<p>::uintX_t fp_test = 0;
+  sw rk_test(tau, rk.base());
+  fp_type fp_test = 0;
   for (size_t i = last_window_index; i < text.size(); ++i) {
     fp_test = rk_test.roll_right(fp_test, (u_char)0, (u_char)text[i]);
   }
@@ -91,7 +98,7 @@ inline void benchmark_j(std::string &text, std::string &path, uint128_t tau, uin
   }
 
   std::cout << "RESULT"
-            << " algo=jonas" << p::shift
+            << " algo=jonas" << shift
             << " text=" << path
             << " size=" << text.size()
             << " time=" << time
@@ -126,16 +133,16 @@ int main(int argc, char **argv) {
   benchmark_a<89>(text, path, tau, base);
   benchmark_a<107>(text, path, tau, base);
 
-  benchmark_j<kr_fingerprinting::MERSENNE61>(text, path, tau, base);
-  benchmark_j<kr_fingerprinting::MERSENNE89>(text, path, tau, base);
-  benchmark_j<kr_fingerprinting::MERSENNE107>(text, path, tau, base);
-  benchmark_j<kr_fingerprinting::MERSENNE127>(text, path, tau, base);
+  benchmark_j<61>(text, path, tau);
+  benchmark_j<122>(text, path, tau);
+  benchmark_j<89>(text, path, tau);
+  benchmark_j<107>(text, path, tau);
 
   //WHY IS THIS SO FAST?
-  constexpr uint128_t tau1 = 107;
+  constexpr uint128_t prime = 107;
   {
     timer tmr{};
-    auto rk = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau1>(text.cbegin(), tau, base);
+    auto rk = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), prime>(text.cbegin(), tau, base);
     auto fp = rk.get_currect_fp();
     for (size_t i = 0; i < text.size() - tau; ++i) {
       fp = rk.roll();
@@ -144,7 +151,7 @@ int main(int argc, char **argv) {
 
     //Correctness test
     size_t last_window_index = text.size() - tau;
-    auto rk_test = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), tau1>(text.cbegin() + last_window_index, tau, base);
+    auto rk_test = herlez::rolling_hash::rk_prime<decltype(text.cbegin()), prime>(text.cbegin() + last_window_index, tau, base);
     auto fp_test = rk_test.get_currect_fp();
     if (fp != fp_test) {
       std::cout << "Fingerprints were not calculated correctly.\n"
@@ -152,7 +159,7 @@ int main(int argc, char **argv) {
     }
 
     std::cout << "RESULT"
-              << " algo=alex" << tau1
+              << " algo=alex" << prime
               << " text=" << path
               << " size=" << text.size()
               << " time=" << time

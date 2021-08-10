@@ -1,0 +1,3 @@
+[submodule "extlib/kr-fingerprinting"]
+	path = extlib/kr-fingerprinting
+	url = https://github.com/jonas-ellert/kr-fingerprinting/
